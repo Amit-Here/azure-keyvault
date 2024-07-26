@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:azure-key-vault="http://www.mulesoft.org/schema/mule/azure-key-vault"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/azure-key-vault http://www.mulesoft.org/schema/mule/azure-key-vault/current/mule-azure-key-vault.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="e18c2048-3c1b-428a-8474-a5d10190a05c" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<configuration-properties doc:name="Configuration properties" doc:id="d6851bf8-eb80-4ff8-a185-a7ce0e3e5611" file="kv.properties" />
+	<azure-key-vault:config name="Azure_Key_Vault_Config" doc:name="Azure Key Vault Config" doc:id="bea2deb5-a65a-4946-91a2-1040b1219b03" >
+		<azure-key-vault:connection clientId="${azure.keyVault.clientId}" tenantId="${azure.keyVault.tenantId}" clientSecret="${azure.keyVault.clientSecret}" vaultName="${azure.keyVault.vaultName}" />
+	</azure-key-vault:config>
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="872257a8-e778-41bf-ad3d-fe22f0d50d8e">
+		<http:request-connection protocol="HTTPS" port="443" host="login.microsoftonline.com"/>
+	</http:request-config>
+	<http:request-config name="HTTP_Request_configuration1" doc:name="HTTP Request configuration" doc:id="f24dc170-e4f5-480a-8bb3-aae59b60366d" >
+		<http:request-connection protocol="HTTPS" port="443" host="amit-practicevault.vault.azure.net"/>
+	</http:request-config>
+	<http:request-config name="HTTP_Request_configuration2" doc:name="HTTP Request configuration" doc:id="d195dbe8-a66f-493f-b9a1-16fc13e7d4e9" >
+		<http:request-connection port="443" />
+	</http:request-config>
+	<flow name="azure-keyvaultFlow" doc:id="ab43343b-f53b-467c-b7bd-438ecccdc561" >
+		<http:listener doc:name="Listener" doc:id="40643888-3a94-46dc-afa2-2514208c458f" config-ref="HTTP_Listener_config" path="/getSecret"/>
+		<azure-key-vault:get-secret doc:name="Get Secret" doc:id="90b54490-af4c-4b5c-906f-d23bb5936456" config-ref="Azure_Key_Vault_Config" name="${azure.keyVault.secretName}"/>
+		<ee:transform doc:name="Transform Message" doc:id="80fc78eb-a84c-4fe0-8887-addee752c33d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json 
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="5e7f7d53-6c21-44dc-8c97-0aa4cc0f947c" message="#[payload]"/>
+	</flow>
+	<flow name="azure-keyvaultFlow1" doc:id="c17fb4de-a7e9-4f52-b5b0-3f3a37c29e2f" >
+		<http:listener doc:name="Listener" doc:id="5bc51e52-536a-44f6-8e4b-dc9e01ba7ac6" config-ref="HTTP_Listener_config" path="/secretValue"/>
+		<http:request method="POST" doc:name="Request for access token" doc:id="ef26ca9b-9cbe-454d-a10d-319d2a73ba16" config-ref="HTTP_Request_configuration" path="/27ac28ef-bfb7-4da0-b881-9901e64fabed/oauth2/v2.0/token">
+			<http:body ><![CDATA[#[output application/x-www-form-urlencoded
+---
+{
+	"client_id": "96054482-752b-4cf8-946f-16820b82ea6d",
+	"client_secret": "s418Q~hqi5W6lKnZgdHkUXp57KzYPOBWsyBGIdvP",
+	"grant_type": "client_credentials",
+	"scope": "https://vault.azure.net/.default"
+}]]]></http:body>
+		</http:request>
+		<set-variable value='#["Bearer " ++ payload.access_token]' doc:name="accessToken" doc:id="66c577f2-1989-49a7-81a6-7014118c9716" variableName="accessToken"/>
+		<http:request method="GET" doc:name="Request to list all secret name" doc:id="11049a03-dd91-4ae0-a93c-fce94971b7f2" config-ref="HTTP_Request_configuration1" path="/secrets/?api-version=7.1">
+			<http:headers ><![CDATA[#[output application/java
+---
+{
+	Authorization : vars.accessToken
+}]]]></http:headers>
+		</http:request>
+		<foreach doc:name="For Each" doc:id="81c927e0-b647-489b-a2f0-6411e5562a03" collection="#[payload.value]">
+			<logger level="INFO" doc:name="Logger" doc:id="11656336-97ee-41dd-967d-e025998e3808" message='#["Running For Each for "++ (vars.counter default "")]'/>
+			<http:request method="GET" doc:name="Request to get each secret value" doc:id="a1bb43c4-fabb-4578-ada2-4c0169206335" url="#[payload.id]">
+				<http:headers ><![CDATA[#[output application/java
+---
+{
+	Authorization : vars.accessToken
+}]]]></http:headers>
+				<http:query-params ><![CDATA[#[output application/java
+---
+{
+	"api-version" : "7.1"
+}]]]></http:query-params>
+			</http:request>
+			<!-- [STUDIO:"accumResp"]<set-variable value="#[%dw 2.0&#10;output application/json&#10;&#45;&#45;-&#10;((vars.accumResp default [&#93;) + payload)&#93;" doc:name="accumResp" doc:id="fd2a6382-2f3c-4cda-80e5-84546f86cd57" variableName="accumResp" /> [STUDIO] -->
+			<ee:transform doc:name="Transform Message" doc:id="d7c02f75-c3d9-4969-86f1-5ea0cdae5148" >
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="accumResp" ><![CDATA[%dw 2.0
+output application/json
+---
+((vars.accumResp default []) + payload)
+]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</foreach>
+		<set-payload value="#[vars.accumResp]" doc:name="Set Payload" doc:id="c3feb352-0d58-40e6-bdcf-8d401a09b078" />
+	</flow>
+</mule>
